@@ -15,12 +15,12 @@ async function main() {
     signer: await InMemorySigner.fromSecretKey(process.env.PRIVATE_KEY),
   });
 
-  await leverageTez(Tezos, Math.pow(10, 6));
+  await leverageTez(Tezos, Math.pow(10, 1), 5 * Math.pow(10, 17));
 }
 
 main();
 
-async function leverageTez(Tezos, xtzAmountInMutez) {
+async function leverageTez(Tezos, xtzAmountInMutez, kUSDAmountToBorrow) {
   /*
     1. Add $XTZ collateral.
     2. Mint $kUSD against it. 
@@ -35,6 +35,11 @@ async function leverageTez(Tezos, xtzAmountInMutez) {
     ...oven.methods
       .default()
       .toTransferParams({ amount: xtzAmountInMutez, mutez: true }),
+  });
+
+  transactions.push({
+    kind: OpKind.TRANSACTION,
+    ...oven.methods.borrow(kUSDAmountToBorrow).toTransferParams(),
   });
 
   try {
