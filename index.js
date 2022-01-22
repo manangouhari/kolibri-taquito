@@ -21,10 +21,7 @@ async function main() {
     signer: await InMemorySigner.fromSecretKey(process.env.PRIVATE_KEY),
   });
 
-  // await leverageTez(Tezos, Math.pow(10, 1), 5 * Math.pow(10, 17));
-  console.log(
-    (await estimatemKUSDtoTEZ(Tezos, BigNumber(10).pow(20))).toString()
-  );
+  leverageTez(Tezos, BigNumber(1e6), BigNumber(1e18));
 }
 
 main();
@@ -43,18 +40,43 @@ async function leverageTez(Tezos, xtzAmountInMutez, kUSDAmountToBorrow) {
     kind: OpKind.TRANSACTION,
     ...oven.methods
       .default()
-      .toTransferParams({ amount: xtzAmountInMutez, mutez: true }),
+      .toTransferParams({ amount: xtzAmountInMutez.toString(), mutez: true }),
   });
 
   transactions.push({
     kind: OpKind.TRANSACTION,
-    ...oven.methods.borrow(kUSDAmountToBorrow).toTransferParams(),
+    ...oven.methods.borrow(kUSDAmountToBorrow.toString()).toTransferParams(),
+  });
+
+  const kusd = await Tezos.wallet.at(contracts.KolibriUSD);
+  transactions.push({
+    kind: OpKind.TRANSACTION,
+    ...kusd.methods
+      .approve(contracts.QuipuKolibriDEX, kUSDAmountToBorrow.toString())
+      .toTransferParams(),
+  });
+
+  let teztimate = await estimateKUSDtoTEZ(Tezos, kUSDAmountToBorrow);
+  teztimate = withSlippage(teztimate, 1);
+  const kolibriDEX = await Tezos.wallet.at(
+    "KT1K4EwTpbvYN9agJdjpyJm4ZZdhpUNKB3F6"
+  );
+  transactions.push({
+    kind: OpKind.TRANSACTION,
+    ...kolibriDEX.methods
+      .tokenToTezPayment(
+        kUSDAmountToBorrow.toString(),
+        teztimate.toString(),
+        "tz1gF55wBNAMRiyEjKeiv2rWZ6VUHGr8sE7i"
+      )
+      .toTransferParams(),
   });
 
   try {
+    console.log("Preparing batch.");
     const batch = Tezos.wallet.batch(transactions);
     const op = await batch.send();
-    console.log("Operation Sent -- Confirming block.");
+    console.log("Operation Sent -- Confirming block.", op.opHash);
     await op.confirmation(3);
     console.log(`Operation Confirmed: ${op.opHash}`);
   } catch (err) {
@@ -74,10 +96,10 @@ async function makeOven(Tezos) {
   }
 }
 
-async function estimatemKUSDtoTEZ(Tezos, kUSDAmount) {
+async function estimateKUSDtoTEZ(Tezos, kUSDAmount) {
   kolibriDEX = await Tezos.wallet.at("KT1K4EwTpbvYN9agJdjpyJm4ZZdhpUNKB3F6");
   const dexStorage = await kolibriDEX.storage();
-  // console.log(dexStorage.storage.tez_pool.div(1e6).toString());
+
   const tokenInWithFee = kUSDAmount.times(FEE_FACTOR);
   const numerator = tokenInWithFee.times(dexStorage.storage.tez_pool);
   const denominator = dexStorage.storage.token_pool
@@ -85,4 +107,8 @@ async function estimatemKUSDtoTEZ(Tezos, kUSDAmount) {
     .plus(tokenInWithFee);
 
   return numerator.idiv(denominator);
+}
+
+function withSlippage(value, slippage) {
+  return value.times(BigNumber(100).minus(slippage)).idiv(100);
 }
